@@ -1,78 +1,31 @@
-#include <stdio.h>
 #include <malloc.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <string.h>
-#include <sys/types.h>
-#include <unistd.h>
-#include <arpa/inet.h>
-#include <sys/wait.h>
 #include <stdlib.h>
-#include <pthread.h>
-#include <sys/shm.h>
-#include <sys/ipc.h>
-#include <sys/msg.h>
-
-typedef struct list_node {
-    int num;
-    struct list_node *next;
-} t_list_node;
 
 enum {
-    CASE_LIST = 1,
-    CASE_TCP_SERVER,
-    CASE_TCP_CLIENT,
-    CASE_FORK,
-    CASE_SIGNAL,
-    CASE_PTHREAD,
-    CASE_SHARE_MEM,
-    CASE_MSG_QUEUE,
+    CASE_DLINK_LIST = 1,
+    CASE_LIST,
+    CASE_SORT_ALGORITHM,
 };
 
-
+void dlink_list_case(void);
 void list_case(void);
-void tcp_server_case(void);
-void tcp_client_case(void);
-void fork_case(void);
-void signal_case(void);
-void pthread_case(void);
-void share_mem_case(void);
-void msg_queue_case(void);
+void sort_algorithm_case(void);
 int main(int argc, char **argv)
 {
-    int caseid = 8;
+
+    int caseid = 3;
 
     switch (caseid) {
+        case CASE_DLINK_LIST:
+            dlink_list_case();
+            break;
+
         case CASE_LIST:
             list_case();
             break;
 
-        case CASE_TCP_SERVER:
-            tcp_server_case();
-            break;
-
-        case CASE_TCP_CLIENT:
-            tcp_client_case();
-            break;
-
-        case CASE_FORK:
-            fork_case();
-            break;
-
-        case CASE_SIGNAL:
-            signal_case();
-            break;
-
-        case CASE_PTHREAD:
-            pthread_case();
-            break;
-
-        case CASE_SHARE_MEM:
-            share_mem_case();
-            break;
-
-        case CASE_MSG_QUEUE:
-            msg_queue_case();
+        case CASE_SORT_ALGORITHM:
+            sort_algorithm_case();
             break;
 
         default:
@@ -82,437 +35,271 @@ int main(int argc, char **argv)
 }
 
 
-typedef struct msg_data {
-    long int msg_type;
-    char *data;
-} t_msg_data;
-
-#define BUF_SIZE 1024
-
-void msg_queue_case(void)
+enum {
+    CASE_BUBBLE = 1,
+    CASE_STRAIGHT_INSERT,
+};
+void bubble_case(int *array, int len);
+void straight_insert_case(int *array, int len);
+void sort_algorithm_case(void)
 {
-    pid_t pid;
-    key_t key = 1234539;
-    int msgid = 0;
-    t_msg_data sendmsg, recvmsg;
-    long int msgtype = 3;
-    int ret;
+    int len = 10;
+    int *array = malloc(sizeof(int) * len);
+    int i = 0;
+    int caseid = 2;
 
-    msgid = msgget(key, IPC_PRIVATE|0666);
-    printf("msgid:%d\n", msgid);
-
-    pid = fork();
-
-    if (!pid) {
-        memset(&recvmsg, 0, sizeof(recvmsg));
-        recvmsg.msg_type = msgtype;
-        recvmsg.data = malloc(BUF_SIZE);
-
-        while (1) {
-            memset(recvmsg.data, 0, BUF_SIZE);
-            ret = msgrcv(msgid, &recvmsg, BUF_SIZE + 1, msgtype, 0);
-            printf("ret:%d, Recv: %s\n", ret, recvmsg.data);
-
-            if (strncmp(recvmsg.data, "end", 3) == 0)
-                break;
-        }
-
-        free(recvmsg.data);
-        recvmsg.data = NULL;
-
-        exit(0);
+    printf("array is:");
+    for (; i < len; i++) {
+        array[i] = random() % 9 ;
+        printf("%d ", array[i]);
     }
-    else {
-        memset(&sendmsg, 0, sizeof(sendmsg));
-        sendmsg.msg_type = msgtype;
-        sendmsg.data = malloc(BUF_SIZE);
+    printf("\n");
 
-        while (1) {
-            memset(sendmsg.data, 0, BUF_SIZE);
-            printf("Enter msg:");
-            fgets(sendmsg.data, BUF_SIZE, stdin);
-            msgsnd(msgid, &sendmsg, strlen(sendmsg.data), 0);
-            sleep(1);
-
-            if (strncmp(sendmsg.data, "end", 3) == 0)
-                break;
-        }
-
-        free(sendmsg.data);
-        sendmsg.data = NULL;
-    }
-
-    msgctl(msgid, IPC_RMID, 0);
-}
-
-
-void share_mem_case(void)
-{
-    pid_t pid;
-    int shmid;
-    key_t key = 12345678; // i don't know why it failed with using this key generate the share memory
-    int memsize = 2 * 4 * 1024;
-    char *pmem = NULL;
-    char *str = "hello beauty";
-
-    shmid = shmget(IPC_PRIVATE, memsize, IPC_CREAT|IPC_EXCL|0666);
-    printf("shmid:%d\n", shmid);
-
-    pid = fork();
-    if (!pid) {
-        pmem = shmat(shmid, NULL, 0);
-        memcpy(pmem, str, strlen(str));
-        shmdt(pmem);
-        exit(0);
-    }
-    else {
-        wait(NULL);
-        pmem = shmat(shmid, NULL, 0);
-        printf("%s\n", pmem);
-        shmdt(pmem);
-        shmctl(shmid, IPC_RMID, 0);
-    }
-}
-
-
-typedef struct thread_priv {
-    int num;
-    struct thread_priv *next;
-} t_thread_priv;
-
-static pthread_mutex_t mtx = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
-
-void *thread_routine1(void *arg);
-void *thread_routine2(void *arg);
-void pthread_case(void)
-{
-    pthread_t tid1, tid2;
-    t_thread_priv *list = NULL;
-
-    pthread_create(&tid2, NULL, thread_routine2, &list);
-    pthread_create(&tid1, NULL, thread_routine1, &list);
-
-    sleep(2);
-    pthread_cancel(tid1);
-    pthread_cancel(tid2);
-    pthread_join(tid1, NULL);
-    pthread_join(tid2, NULL);
-
-    printf("this is main thread endline\n");
-}
-
-void *thread_routine2(void *arg)
-{
-    t_thread_priv *list;
-    int list_len = 10;
-
-    pthread_mutex_lock(&mtx);
-    while (list_len--) {
-        list = malloc(sizeof(t_thread_priv));
-        list->num = list_len;
-        printf("add %d in stack\n", list->num);
-        list->next = *(t_thread_priv **)arg;
-        *(t_thread_priv **)arg = list;
-    }
-    pthread_mutex_unlock(&mtx);
-    pthread_cond_signal(&cond);
-}
-
-void *thread_routine1(void *arg)
-{
-    t_thread_priv *list = *(t_thread_priv **)arg;
-
-    while (1) {
-        pthread_mutex_lock(&mtx);
-        list = *(t_thread_priv **)arg;
-        while (list == NULL) {
-            pthread_cond_wait(&cond, &mtx);
-        }
-        printf("Got %d from stack\n", list->num);
-        *(t_thread_priv **)arg = list->next;
-        free(list);
-        pthread_mutex_unlock(&mtx);
-    }
-}
-
-
-void intr_isr(int sig);
-void alrm_isr(int sig);
-void signal_case(void)
-{
-    pid_t pid;
-
-    (void *)signal(SIGINT, intr_isr);
-
-    if (!pid) {
-        printf("alarm start after 5 seconds\n");
-        sleep(5);
-        kill(getppid(), SIGALRM);
-        exit(0);
-    }
-    else {
-        (void *)signal(SIGALRM, alrm_isr);
-        wait(NULL);
-    }
-
-    while(1) {
-        printf("This process is alive\n");
-        sleep(1);
-    }
-}
-
-void alrm_isr(int sig)
-{
-    printf("Alarm Done\n");
-}
-
-void intr_isr(int sig)
-{
-    printf("hello beauty, give me a kiss\n");
-    (void *)signal(SIGINT, SIG_DFL);
-}
-
-
-void fork_case(void)
-{
-    pid_t pid, cid;
-    char *msg;
-    int loop = 0;
-    int exit_code = 0;
-    int stat;
-
-    pid = fork();
-
-    switch (pid) {
-        case -1:
-            printf("fork failed\n");
+    switch (caseid) {
+        case CASE_BUBBLE:
+            bubble_case(array, len);
             break;
 
-        case 0:
-            msg = "This is a child process";
-            loop = 3;
-            exit_code = 33;
+        case CASE_STRAIGHT_INSERT:
+            straight_insert_case(array, len);
             break;
 
         default:
-            msg = "This is a father process";
-            loop = 5;
-            cid = wait(&stat);
-            if (WIFEXITED(stat))
-                printf("child process:%d exit with code:%d\n", cid, WEXITSTATUS(stat));
-            else
-                printf("child process exit abnormally\n");
+            printf("no case match\n");
             break;
     }
 
-    while (loop--) {
-        printf("%s\n", msg);
+    printf("array is:");
+    for (i = 0; i < len; i++) {
+        printf("%d ", array[i]);
     }
-
-    exit(exit_code);
+    printf("\n");
 }
 
-
-#define PORT_NUM 1999
-#define SEVER_IP "10.0.0.11"
-void tcp_client_case(void)
+void straight_insert_case(int *array, int len)
 {
-    int sockfd;
-    struct sockaddr_in saddr;
-    int port = PORT_NUM;
-    char *serverip = SEVER_IP;
-    char *buf = malloc(BUF_SIZE);
+    int i, j;
+    int tmp, idx;
 
-    sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    for (i = 0; i < len - 1; i++) {
+        for (j = i + 1; j > 0; j--) {
+            if (array[j] > array[j - 1]) {
+                break;
+            }
 
-    memset(&saddr, 0, sizeof(saddr));
-    saddr.sin_family = AF_INET;
-    saddr.sin_port = htons(port);
-    saddr.sin_addr.s_addr = inet_addr(serverip);
-
-    connect(sockfd, (const struct sockaddr *)&saddr, sizeof(saddr));
-
-    memset(buf, 0, BUF_SIZE);
-    printf("Enter msg:");
-    fgets(buf, BUF_SIZE, stdin);
-    write(sockfd, buf, strlen(buf));
-
-    free(buf);
-    close(sockfd);
-}
-
-
-void tcp_server_case(void)
-{
-    int sfd, cfd;
-    struct sockaddr_in saddr, c_addr;
-    int c_len = 0;
-    int port = PORT_NUM;
-    char *buf = malloc(BUF_SIZE);
-    int nbytes = 0;
-
-    sfd = socket(AF_INET, SOCK_STREAM, 0);
-
-    memset(&saddr, 0, sizeof(saddr));
-    saddr.sin_family = AF_INET;
-    saddr.sin_port = htons(port);
-    saddr.sin_addr.s_addr = htonl(INADDR_ANY);
-
-    bind(sfd, (const struct sockaddr *)&saddr, sizeof(saddr));
-
-    if (listen(sfd, 5) == 0)
-        printf("Listening\n");
-    else
-        printf("Listen failed\n");
-
-    memset(&c_addr, 0, sizeof(c_addr));
-    while (1) {
-        cfd = accept(sfd, (struct sockaddr *)&c_addr, &c_len);
-        if (cfd) {
-            memset(buf, 0, BUF_SIZE);
-            nbytes = read(cfd, buf, BUF_SIZE);
-            printf("Recv %dBytes: %s\n", nbytes, buf);
-            close(cfd);
+            tmp = array[j];
+            array[j] = array[j - 1];
+            array[j - 1] = tmp;
         }
     }
+}
 
-    free(buf);
-    buf = NULL;
-    close(sfd);
+void bubble_case(int *array, int len)
+{
+    int i, j;
+
+    for (i = 0; i < len - 1; i++) {
+        for (j = 0; j < len - 1 - i; j++) {
+            if (array[j + 1] < array[j]) {
+                int tmp = array[j + 1];
+                array[j + 1] = array[j];
+                array[j] = tmp;
+            }
+        }
+    }
 }
 
 
-void list_add_head(t_list_node **head, int num);
-void print_list(t_list_node *head);
-void list_add_tail(t_list_node **head, int num);
-void list_add_pos(t_list_node **head, int num, int pos);
-void list_reverse(t_list_node **head);
-void list_del_head(t_list_node **head);
-void list_del_tail(t_list_node **head);
+typedef struct list {
+    int data;
+    struct list *next;
+} t_list;
+
+static inline void *list_add_head(t_list *new, t_list **head);
+static inline void __list_add_tail(t_list *new, t_list **head);
+static inline void print_list(t_list *head);
+static inline void list_add_pos(t_list *new, t_list **head, int pos);
+static inline void list_reverse(t_list **head);
+static inline void list_del_head(t_list **head);
+static inline void list_del_tail(t_list **head);
 void list_case(void)
 {
-    t_list_node *head = NULL;
+    t_list *head = NULL, *node;
+    int i = 0;
 
-    list_add_head(&head, 3);
-    list_add_head(&head, 2);
-    list_add_head(&head, 1);
+    for (; i < 10; i++) {
+        node = malloc(sizeof(t_list));
+        node->data = i;
+        node->next = NULL;
+
+        if ((i % 2) == 0)
+            list_add_head(node, &head);
+        else if ((i % 9) == 0)
+            list_add_pos(node, &head, 3);
+        else
+            __list_add_tail(node, &head);
+    }
     print_list(head);
-    list_add_tail(&head, 4);
-    list_add_tail(&head, 5);
-    print_list(head);
-    list_add_pos(&head, 9, 2);
-    print_list(head);
+
     list_reverse(&head);
     print_list(head);
+
     list_del_head(&head);
-    print_list(head);
     list_del_tail(&head);
     print_list(head);
 }
 
-
-void list_del_tail(t_list_node **head)
+static inline void list_del_tail(t_list **head)
 {
-    t_list_node *pre_node = *head, *node = *head;
+    t_list *tail = *head, *prev;
 
-    while (node->next) {
-        pre_node = node;
-        node = node->next;
+    while (tail->next) {
+        prev = tail;
+        tail = tail->next;
     }
 
-    pre_node->next = NULL;
-    free(node);
+    prev->next = NULL;
 }
 
-
-void list_del_head(t_list_node **head)
+static inline void list_del_head(t_list **head)
 {
-    t_list_node *node = *head;
+    t_list *node = *head;
 
     *head = node->next;
     node->next = NULL;
     free(node);
 }
 
-
-void list_reverse(t_list_node **head)
+static inline void list_reverse(t_list **head)
 {
-    t_list_node *t1, *t2, *t;
+    t_list *t1, *t2, *t;
     t1 = *head;
-    t2 = t1->next;
+    t2 = (*head)->next;
+
     while (t2) {
         t = t2->next;
         t2->next = t1;
         t1 = t2;
         t2 = t;
     }
+
     (*head)->next = NULL;
     *head = t1;
 }
 
-
-void list_add_pos(t_list_node **head, int num, int pos)
+static inline void list_add_pos(t_list *new, t_list **head, int pos)
 {
-    t_list_node *phead = *head;
-    t_list_node *node = malloc(sizeof(t_list_node));
-    node->num = num;
-    node->next = NULL;
+    t_list *phead = *head;
 
-    if (!pos) {
-        list_add_head(head, num);
+    while (--pos) {
+        phead = phead->next;
     }
-    else {
-        while (--pos) {
-            phead = phead->next;
-        }
-        node->next = phead->next;
-        phead->next = node;
-    }
+    new->next = phead->next;
+    phead->next = new;
 }
 
-
-void list_add_tail(t_list_node **head, int num)
+static inline void print_list(t_list *head)
 {
-    t_list_node *phead = *head;
-    t_list_node *node = malloc(sizeof(t_list_node));
-    node->num = num;
-    node->next = NULL;
-
-    if (*head == NULL) {
-        *head = node;
-    }
-    else {
-        while (phead->next) {
-            phead = phead->next;
-        }
-        phead->next = node;
-    }
-}
-
-
-void print_list(t_list_node *head)
-{
-    printf("list is:\n");
+    printf("list is:");
     while (head) {
-        printf("%d ", head->num);
+        printf("%d ", head->data);
         head = head->next;
     }
     printf("\n");
 }
 
-
-void list_add_head(t_list_node **head, int num)
+static inline void __list_add_tail(t_list *new, t_list **head)
 {
-    t_list_node *node = malloc(sizeof(t_list_node));
-    node->num = num;
-    node->next = NULL;
+    t_list *phead = *head;
 
-    if (*head == NULL) {
-        *head = node;
+    if (!(*head)) {
+        *head = new;
     }
     else {
-        node->next = *head;
-        *head = node;
+        while (phead->next) {
+            phead = phead->next;
+        }
+        phead->next = new;
+    }
+}
+
+static inline void *list_add_head(t_list *new, t_list **head)
+{
+    if (!(*head)) {
+        *head = new;
+    }
+    else {
+        new->next = *head;
+        *head = new;
+    }
+}
+
+
+typedef struct list_head {
+    struct list_head *next;
+    struct list_head *prev;
+} t_list_head;
+
+static inline void INIT_LIST_HEAD(t_list_head *list)
+{
+    list->next = list;
+    list->prev = list;
+}
+
+static inline void __list_add(t_list_head *new, t_list_head *prev, t_list_head *next)
+{
+    next->prev = new;
+    new->next = next;
+    new->prev = prev;
+    prev->next = new;
+}
+
+static inline void list_add_tail(t_list_head *new, t_list_head *head)
+{
+    __list_add(new, head->prev, head);
+}
+
+typedef struct fox {
+    int tail_length;
+    int weight;
+    struct list_head list_node;
+} t_fox;
+
+t_fox *create_fox(int len, int weight)
+{
+    t_fox *tmp = malloc(sizeof(t_fox));
+
+    tmp->tail_length = len;
+    tmp->weight = weight;
+
+    return tmp;
+}
+
+
+
+#define list_entry(ptr, type, member) \
+    ((char *)ptr - (char *)(&(((type *)0)->member)))
+
+#define list_for_each(pos, head) \
+    for (pos = head->next; pos != head; pos = pos->next)
+
+void dlink_list_case(void)
+{
+    t_fox *fox_list = malloc(sizeof(t_fox));
+    t_fox *fox;
+    t_list_head *node;
+
+    t_list_head *head = &(fox_list->list_node);
+    INIT_LIST_HEAD(head);
+
+    fox = create_fox(100, 100);
+    list_add_tail(&(fox->list_node), head);
+
+    fox = create_fox(10, 900);
+    list_add_tail(&(fox->list_node), head);
+
+    list_for_each(node ,head) {
+        fox = (t_fox *)list_entry(node, t_fox, list_node);
+        printf("fox: tail_length=%d, weight=%d\n", fox->tail_length, fox->weight);
     }
 }
